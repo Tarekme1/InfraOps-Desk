@@ -1,5 +1,7 @@
 # InfraOps Desk
 
+[![Smoke and API tests](https://github.com/Tarekme1/InfraOps-Desk/actions/workflows/tests.yml/badge.svg)](https://github.com/Tarekme1/InfraOps-Desk/actions/workflows/tests.yml)
+
 Local IT incident and asset-management demonstration built around a small, testable Python API and a responsive browser interface. No accounts, external services, or third-party packages are required.
 
 ![Operations overview — fictional demo data](docs/overview.png)
@@ -22,7 +24,7 @@ Open **http://127.0.0.1:8765/**. On the first run, SQLite is initialized in `dat
 python -m unittest discover -s tests -v
 ```
 
-The 13 tests exercise priority rules, input validation, HTTP endpoints, persistence, incident status history, data export, access to unlisted paths, response security headers, and aggregate counts. The GitHub Actions workflow is configured to run the suite on supported Python versions after publication. See [verification notes](docs/VERIFICATION.md) for the last independently observed local result.
+The 13 tests exercise priority rules, input validation, HTTP endpoints, persistence, incident status history, data export, access to unlisted paths, response security headers, and aggregate counts. GitHub Actions runs this suite on Python 3.10, 3.12 and 3.13. The first published CI run passed all three jobs. See [verification notes](docs/VERIFICATION.md) for observed results and limitations.
 
 ## Features
 
