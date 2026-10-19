@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="InfraOps Desk — a fictional IT incident and asset management portfolio demo">
+  <title>InfraOps Desk | IT Operations Demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="/" aria-label="InfraOps Desk home"><span class="brand-mark">I<span>↗</span></span><span>INFRAOPS <small>DESK</small></span></a>
+      <div class="nav-caption">WORKSPACE</div>
+      <nav class="nav">
+        <button type="button" class="nav-link active" data-view="overview"><span aria-hidden="true">▦</span> Overview</button>
+        <button type="button" class="nav-link" data-view="incidents"><span aria-hidden="true">◇</span> Incidents</button>
+        <button type="button" class="nav-link" data-view="assets"><span aria-hidden="true">▤</span> Asset Registry</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="demo-label"><span class="demo-dot"></span> SIMULATION ACTIVE</div>
+        <p>Fictional equipment and incident records. No factory or customer data.</p>
+        <small>Portfolio demonstration • v1.1</small>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <span class="breadcrumb">WORKSPACE <span>/</span> <strong id="crumb">OVERVIEW</strong></span>
+        <div class="top-right"><span class="live-dot"></span> LOCAL DEMO <span class="top-divider"></span> <span id="clock"></span></div>
+      </header>
+      <div class="content">
+        <div class="title-row">
+          <div><div class="eyebrow">IT OPERATIONS & SERVICE RELIABILITY</div><h1 id="pageTitle">Operations overview</h1><p class="subtitle" id="pageIntro">Incident visibility, response priorities and asset health — in one place.</p></div>
+          <button class="btn primary" id="newTicketTop" type="button">+ New incident</button>
+        </div>
+        <div class="notice"><span>ⓘ</span><div><strong>Demo environment</strong> — All people, assets, incidents, timestamps and service-level targets are fictional. Priority rules are illustrative, not a formal ITIL standard.</div></div>
+        <section id="view-overview" class="view">
+          <div class="stats" id="stats" aria-live="polite">
+            <div class="stat"><span class="stat-label">OPEN INCIDENTS</span><strong>—</strong></div>
+            <div class="stat"><span class="stat-label">SLA BREACHES</span><strong>—</strong></div>
+            <div class="stat"><span class="stat-label">RESOLVED</span><strong>—</strong></div>
+            <div class="stat"><span class="stat-label">REGISTERED ASSETS</span><strong>—</strong></div>
+          </div>
+          <div class="cols">
+            <section class="panel"><div class="panel-heading"><div><h2>Incident queue</h2><p>Prioritized by outstanding service deadlines</p></div><button class="text-button" data-view="incidents" type="button">View all ↗</button></div><div id="recent" class="table-scroll"></div></section>
+            <section class="panel panel-insight"><div class="panel-heading"><div><h2>Priority model</h2><p>Impact × urgency triage</p></div></div><div class="priority-rules"><div><span class="priority P1">P1</span><span>Critical</span><strong>1 hour</strong></div><div><span class="priority P2">P2</span><span>High</span><strong>4 hours</strong></div><div><span class="priority P3">P3</span><span>Normal</span><strong>24 hours</strong></div><div><span class="priority P4">P4</span><span>Low</span><strong>72 hours</strong></div></div><div class="insight-note"><strong>Decision support, not a claim of real operations.</strong> In a production system, SLAs would depend on contracts, calendars and escalation rules.</div></section>
+          </div>
+        </section>
+        <section id="view-incidents" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Incident register</h2><p>Create, track and resolve fictional IT cases</p></div><a class="btn secondary" href="/api/export.csv">↓ Export CSV</a></div><div class="filters"><label class="sr-only" for="ticketSearch">Search incidents</label><input id="ticketSearch" type="search" placeholder="Search title or asset tag…" maxlength="100"><label class="sr-only" for="statusFilter">Filter status</label><select id="statusFilter"><option value="">All statuses</option><option>Open</option><option>In Progress</option><option>Resolved</option></select></div><div id="ticketTable" class="table-scroll"></div></div></section>
+        <section id="view-assets" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Asset registry</h2><p>Six fabricated assets across core IT categories</p></div><span class="muted-pill">DEMO DATA ONLY</span></div><div id="assetTable" class="table-scroll"></div></div></section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="createDialog" class="modal" aria-labelledby="createTitle">
+    <form id="createForm">
+      <div class="dialog-head"><div><div class="eyebrow">NEW INCIDENT</div><h2 id="createTitle">Log an IT issue</h2></div><button type="button" class="icon-button" data-close="createDialog" aria-label="Close">×</button></div>
+      <label>Issue title <input name="title" placeholder="e.g. Backup agent service stopped" minlength="5" maxlength="120" required></label>
+      <label>Affected asset <select name="asset_id" id="assetOptions" required></select></label>
+      <div class="double"><label>Impact <select name="impact"><option value="1">1 — Limited</option><option value="2" selected>2 — Multiple users</option><option value="3">3 — Major service</option></select></label><label>Urgency <select name="urgency"><option value="1">1 — Routine</option><option value="2" selected>2 — Soon</option><option value="3">3 — Immediate</option></select></label></div>
+      <label>What happened? <textarea name="description" rows="3" maxlength="1500" placeholder="Optional troubleshooting context"></textarea></label>
+      <p class="hint">Priority is assigned automatically using the demo impact + urgency matrix.</p>
+      <div class="dialog-actions"><button type="button" class="btn secondary" data-close="createDialog">Cancel</button><button class="btn primary" type="submit">Create incident</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ticketDialog" class="modal" aria-labelledby="ticketTitle"><div class="dialog-head"><div><div class="eyebrow">INCIDENT DETAIL</div><h2 id="ticketTitle">Incident</h2></div><button type="button" class="icon-button" data-close="ticketDialog" aria-label="Close">×</button></div><div id="ticketDetail"></div><form id="statusForm" class="status-form"><label>Change status<select name="status" id="nextStatus"><option>Open</option><option>In Progress</option><option>Resolved</option></select></label><label>Action note <textarea name="note" rows="2" maxlength="500" placeholder="What was checked or fixed?"></textarea></label><button class="btn primary" type="submit">Save update</button></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
