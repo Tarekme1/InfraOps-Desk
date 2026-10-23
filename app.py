@@ -1,6 +1,7 @@
 """Local-only IT Incident & Asset demo, Python 3.10+, no external packages."""
 import csv
 import io
+import ipaddress
 import json
 import os
 import secrets
@@ -9,6 +10,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from store import Store
+
+
+def secure_cookie_attributes(http_only=True):
+    flags = "; SameSite=Strict; Path=/"
+    if http_only:
+        flags += "; HttpOnly"
+    if os.environ.get("MIHWAR_SECURE_COOKIES") == "1":
+        flags += "; Secure"
+    return flags
+
+
+def login_source_address(peer_address, forwarded_for, trusted_proxy):
+    """Honor one proxy-provided client IP only from an explicitly trusted peer."""
+    if not trusted_proxy or peer_address != trusted_proxy or not forwarded_for:
+        return peer_address
+    try:
+        return str(ipaddress.ip_address(forwarded_for.strip()))
+    except ValueError:
+        return peer_address
 
 
 def spreadsheet_safe(value):
@@ -30,6 +50,9 @@ ASSETS = {"/": (ROOT / "static/index.html", "text/html; charset=utf-8"),
 class Handler(BaseHTTPRequestHandler):
     store = None
     server_version = "InfraOpsDemo/1.0"
+
+    def cookie_attributes(self, http_only=True):
+        return secure_cookie_attributes(http_only)
 
     def session(self):
         cookies = self.headers.get("Cookie", "")
@@ -109,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
                 user, _ = self.session()
                 if not user:
                     csrf = secrets.token_urlsafe(24)
-                    return self.respond({"user": None, "csrf_token": csrf}, extra_headers={"Set-Cookie": f"m_csrf={csrf}; SameSite=Strict; Path=/"})
+                    return self.respond({"user": None, "csrf_token": csrf}, extra_headers={"Set-Cookie": f"m_csrf={csrf}{self.cookie_attributes()}"})
                 return self.respond({"user": {"username": user["username"], "role": user["role"]}, "csrf_token": user["csrf_token"]})
             if path == "/api/employee/assets":
                 user = self.require_user({"employee"})
@@ -211,23 +234,42 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Username and password are required")
                 if not self.cookie("m_csrf") or not secrets.compare_digest(self.cookie("m_csrf"), self.headers.get("X-CSRF-Token", "")):
                     return self.respond({"error": "Invalid CSRF token"}, 403)
+                remote_address = login_source_address(self.client_address[0], self.headers.get("X-Forwarded-For"),
+                                                      os.environ.get("MIHWAR_TRUSTED_PROXY_IP"))
+                allowed, retry_after = self.store.login_allowed(payload["username"], remote_address)
+                if not allowed:
+                    return self.respond({"error": "Too many sign-in attempts. Try again later."}, 429,
+                                        {"Retry-After": str(retry_after)})
                 user = self.store.authenticate(payload["username"], payload["password"])
                 if not user:
+                    self.store.record_login_failure(payload["username"], remote_address)
                     return self.respond({"error": "Invalid username or password"}, 401)
+                self.store.clear_login_failures(payload["username"], remote_address)
                 token, csrf, expires = self.store.create_session(user["id"])
+                expiry = datetime.strptime(expires, '%Y-%m-%dT%H:%M:%SZ').strftime('%a, %d %b %Y %H:%M:%S GMT')
                 return self.respond({"user": {"username": user["username"], "role": user["role"]}, "csrf_token": csrf}, 200,
-                    {"Set-Cookie": f"m_session={token}; HttpOnly; SameSite=Strict; Path=/; Expires={datetime.strptime(expires, '%Y-%m-%dT%H:%M:%SZ').strftime('%a, %d %b %Y %H:%M:%S GMT')}"})
+                    {"Set-Cookie": f"m_session={token}{self.cookie_attributes()}; Expires={expiry}"})
             if path == "/api/logout":
                 user = self.require_user(csrf=True)
                 if not user: return
                 _, token = self.session()
                 self.store.logout(token)
-                return self.respond({"ok": True}, extra_headers={"Set-Cookie": "m_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+                return self.respond({"ok": True}, extra_headers={"Set-Cookie": f"m_session={self.cookie_attributes()}; Max-Age=0"})
             if path.startswith("/api/employee/tickets/") and path.endswith("/reopen"):
                 user = self.require_user({"employee"}, csrf=True)
                 if not user: return
                 ticket_id = self.parse_employee_id(path.removesuffix("/reopen"))
                 return self.respond(self.store.reopen_employee_ticket(user["id"], ticket_id))
+            if path.startswith("/api/tickets/") and path.endswith("/notes"):
+                user = self.require_user({"technician", "admin"}, csrf=True)
+                if not user: return
+                payload = self.read_json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Body must be a JSON object")
+                ticket_id = self.parse_id(path.removesuffix("/notes"))
+                if user["role"] == "technician":
+                    self.store.technician_ticket(user["id"], ticket_id)
+                return self.respond(self.store.add_ticket_note(ticket_id, user["id"], payload.get("note"), payload.get("internal", False)))
             user = self.require_user({"employee"}, csrf=True) if path == "/api/employee/tickets" else self.require_user({"technician", "admin"}, csrf=True) if path == "/api/tickets" else None
             if path not in {"/api/tickets", "/api/employee/tickets"}:
                 return self.respond({"error": "Not found"}, 404)
@@ -253,7 +295,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(self.store.ticket(self.parse_id(path.removesuffix("/assign"))))
             user = self.require_user({"technician", "admin"}, csrf=True)
             if not user: return
-            return self.respond(self.store.change_status(self.parse_id(path), payload, user["id"]))
+            ticket_id = self.parse_id(path)
+            if user["role"] == "technician":
+                self.store.technician_ticket(user["id"], ticket_id)
+            return self.respond(self.store.change_status(ticket_id, payload, user["id"]))
         except ValueError as exc:
             return self.respond({"error": str(exc)}, 400)
         except LookupError as exc:

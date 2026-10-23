@@ -4,29 +4,32 @@ Checked locally on October 23, 2026 (Windows, Python 3.15, Node.js available, Ch
 
 ## Observed results
 
-- `py -3 -m unittest discover -s tests -v`: **15 tests passed** locally.
-- `py -3 -m py_compile app.py store.py tests/test_api.py`: passed.
+- `py -3 -m unittest discover -s tests -v`: **21 tests passed** locally.
+- `py -3 -m py_compile app.py store.py scripts/backup_db.py tests/test_api.py`: passed.
 - `node --check static/app.js` and `node --check static/employee.js`: passed.
-- Playwright browser inspection loaded the English operator sign-in and Arabic RTL employee portal. A synthetic employee logged in, submitted a ticket, and saw its reference number in the browser.
-- API integration exercised employee creation, admin assignment, assigned-technician processing, resolution-note requirement, employee status view/reopen, owner and role denials, CSRF rejection, legacy migration, foreign-key integrity, and persistence after starting a second server on the same SQLite file.
+- Playwright browser E2E on a temporary database: employee created ticket #7; admin assigned `qa-tech`; technician added an internal note and an employee-visible update, changed status to In Progress then Resolved with a resolution note; employee saw only the public update and resolution, requested reopen, and the Open state survived a server restart.
+- API tests exercised login throttling, cross-technician update denial, employee ownership boundaries, internal-note filtering, CSRF rejection, legacy migration, and persistence after another server instance started on the same SQLite file.
+- Backup/restore integration snapshotted SQLite, mutated the live database, restored the snapshot, checked integrity/foreign keys, and confirmed the automatic pre-restore copy preserved the post-snapshot database. Corrupt backup input was rejected without altering live data.
 
 All browser and database records were synthetic. The localhost browser run used a temporary database and was not a deployment or workplace pilot.
 
 ## GitHub Actions result
 
 - [Published baseline CI run 39181603254](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39181603254): **passed** on October 19, 2026 before these changes.
-- [PR #2 workflow run 39884559471](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39884559471): **passed** on the exact feature commit `23c9eb722a679f7a614d10f9c8da1a0a7f6e7fbd`.
+- [PR #2 workflow run 39884696763](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39884696763): **passed** on the exact prior feature commit `d7e6b54d6b89b16968fbee58847573ac7dbaa8c8` before this hardening follow-up.
 - All three matrix jobs passed: Python **3.10, 3.12 and 3.13**.
-- This verifies the automated suite for that commit, not a production security review or deployment.
+- A new CI run is required for the current follow-up commit; earlier CI applies only to the exact SHA above.
+- CI verifies automated tests, not a production security review or deployment.
 
 ## Not yet verified
 
-- Real deployment, TLS, login throttling, concurrent multi-user load, external network access, operational backup/restore, and independent security review: **not completed**.
+- Real deployment/TLS proxy, scheduled and encrypted off-site backups, multi-user load, external network access, production recovery objectives, and independent security review: **not completed**.
 
 ### Reproduce
 
 ```bash
 python -m unittest discover -s tests -v
+python -m py_compile app.py store.py scripts/backup_db.py tests/test_api.py
 node --check static/app.js
 node --check static/employee.js
 ```

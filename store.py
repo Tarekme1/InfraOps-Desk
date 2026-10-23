@@ -89,6 +89,12 @@ class Store:
                 csrf_token TEXT NOT NULL,
                 expires_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                bucket TEXT PRIMARY KEY,
+                failures INTEGER NOT NULL,
+                window_started_at TEXT NOT NULL,
+                locked_until TEXT
+            );
             CREATE TABLE IF NOT EXISTS ticket_owners (
                 ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
                 user_id INTEGER NOT NULL REFERENCES users(id)
@@ -214,6 +220,43 @@ class Store:
             return None
         candidate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), user["password_salt"], 240_000)
         return dict(user) if hmac.compare_digest(candidate, user["password_hash"]) else None
+
+    @staticmethod
+    def _login_buckets(username, remote_address):
+        identity = (username.strip().casefold() + "\0" + remote_address).encode("utf-8", "replace")
+        source = ("source\0" + remote_address).encode("utf-8", "replace")
+        return hashlib.sha256(identity).hexdigest(), hashlib.sha256(source).hexdigest()
+
+    def login_allowed(self, username, remote_address):
+        buckets = self._login_buckets(username, remote_address)
+        with self.connect() as db:
+            rows = db.execute("SELECT locked_until FROM login_attempts WHERE bucket IN (?,?)", buckets).fetchall()
+            remaining = [ (as_datetime(row["locked_until"]) - utcnow()).total_seconds()
+                          for row in rows if row["locked_until"] ]
+            if any(seconds > 0 for seconds in remaining):
+                return False, max(1, int(max(remaining) + 0.999))
+            db.execute("DELETE FROM login_attempts WHERE bucket IN (?,?) AND locked_until IS NOT NULL", buckets)
+            return True, 0
+
+    def record_login_failure(self, username, remote_address):
+        buckets = self._login_buckets(username, remote_address)
+        now = utcnow()
+        window = now - timedelta(minutes=15)
+        with self.connect() as db:
+            db.execute("DELETE FROM login_attempts WHERE window_started_at<?", (iso(now - timedelta(days=1)),))
+            for index, bucket in enumerate(buckets):
+                row = db.execute("SELECT failures,window_started_at FROM login_attempts WHERE bucket=?", (bucket,)).fetchone()
+                count = row["failures"] + 1 if row and as_datetime(row["window_started_at"]) > window else 1
+                started = row["window_started_at"] if count > 1 else iso(now)
+                threshold = 5 if index == 0 else 20
+                locked = iso(now + timedelta(minutes=15)) if count >= threshold else None
+                db.execute("INSERT INTO login_attempts(bucket,failures,window_started_at,locked_until) VALUES(?,?,?,?) "
+                           "ON CONFLICT(bucket) DO UPDATE SET failures=excluded.failures,window_started_at=excluded.window_started_at,locked_until=excluded.locked_until",
+                           (bucket, count, started, locked))
+
+    def clear_login_failures(self, username, remote_address):
+        with self.connect() as db:
+            db.execute("DELETE FROM login_attempts WHERE bucket=?", (self._login_buckets(username, remote_address)[0],))
 
     def create_session(self, user_id, ttl_hours=8):
         token = secrets.token_urlsafe(32)
@@ -415,6 +458,18 @@ class Store:
             when = iso(utcnow())
             db.execute("UPDATE tickets SET status=?,resolved_at=? WHERE id=?", (status, when if status == "Resolved" else None, ticket_id))
             db.execute("INSERT INTO ticket_events(ticket_id,actor_id,event,note,created_at) VALUES(?,?,?,?,?)", (ticket_id, actor_id, "Status: " + row["status"] + " → " + status, note.strip(), when))
+        return self.ticket(ticket_id)
+
+    def add_ticket_note(self, ticket_id, actor_id, note, internal=False):
+        if not isinstance(note, str) or not note.strip() or len(note) > 500:
+            raise ValueError("Note must contain 1-500 characters")
+        if type(internal) is not bool:
+            raise ValueError("Internal flag must be boolean")
+        with self.connect() as db:
+            if not db.execute("SELECT 1 FROM tickets WHERE id=?", (ticket_id,)).fetchone():
+                raise LookupError("Ticket not found")
+            db.execute("INSERT INTO ticket_events(ticket_id,actor_id,event,note,created_at) VALUES(?,?,?,?,?)",
+                (ticket_id, actor_id, "Internal: Note" if internal else "Update", note.strip(), iso(utcnow())))
         return self.ticket(ticket_id)
 
     def dashboard(self, assigned_user=None):

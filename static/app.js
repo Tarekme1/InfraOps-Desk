@@ -102,6 +102,13 @@ document.addEventListener('click', async event => {
 $('#newTicketTop').addEventListener('click',() => $('#createDialog').showModal());
 $('#createForm').addEventListener('submit',submitTicket);
 $('#statusForm').addEventListener('submit',submitStatus);
+$('#noteForm').addEventListener('submit',async event=>{
+  event.preventDefault(); const form=event.currentTarget;
+  try {
+    await API(`/api/tickets/${activeTicket}/notes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note:form.elements.note.value,internal:form.elements.internal.value==='true'})});
+    toast('Work note added'); form.reset(); await viewTicket(activeTicket);
+  } catch(error) { toast(error.message); }
+});
 let searchTimer;
 $('#ticketSearch').addEventListener('input',() => {clearTimeout(searchTimer); searchTimer=setTimeout(()=>refreshTickets().catch(e=>toast(e.message)),160)});
 $('#statusFilter').addEventListener('change',() => refreshTickets().catch(e=>toast(e.message)));

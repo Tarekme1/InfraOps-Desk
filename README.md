@@ -44,6 +44,9 @@ The test suite exercises priority rules, input validation, HTTP endpoints, persi
 - Arabic RTL employee portal for creating, tracking, and requesting reopening of owned tickets.
 - Synthetic employee, technician, and administrator accounts with role checks and session-based CSRF protection.
 - Admin assignment to configured technicians; technician view includes their assigned work and the unassigned queue.
+- Technician/admin work notes can be internal or explicitly employee-visible; employee APIs suppress internal events.
+- Login attempts are throttled per username and source address after five failures in a 15-minute window.
+- Verified SQLite backup and restore CLI, including an automatic pre-restore safety copy.
 - Impact + urgency priority calculation (P1–P4) with illustrative resolution targets.
 - Open, in-progress and resolved states with an append-only action timeline.
 - Dashboard counts, deadline breach indicators, filters and CSV export.
@@ -68,6 +71,7 @@ The test suite exercises priority rules, input validation, HTTP endpoints, persi
 | GET | `/employee` | Arabic employee portal |
 | GET/POST | `/api/employee/tickets` | List or create only the signed-in employee's tickets |
 | POST | `/api/employee/tickets/{id}/reopen` | Reopen an owned resolved ticket |
+| POST | `/api/tickets/{id}/notes` | Technician/admin adds an internal or employee-visible work note |
 | PATCH | `/api/tickets/{id}/assign` | Admin assigns a configured technician |
 | GET | `/api/assets` | Fictional assets |
 | GET | `/api/dashboard` | Incident totals and recent cases |
@@ -81,6 +85,26 @@ Create an incident with JSON including `title`, `asset_id`, `impact`, `urgency`,
 
 ## Scope and limitations
 
-**This remains a local portfolio exercise, not a production service desk or actual employer deployment.** All data and service targets are fictional. The server intentionally binds to `127.0.0.1`. The new local authentication, roles, session cookies, CSRF checks, employee ownership and migrations are demonstration safeguards, not a production security certification. TLS, login throttling, operational backup and restore, notification delivery, business-hour SLA calendars, and an independent security review remain before real data or any network exposure. Do not expose it directly to the internet or use real employee, customer or factory information. The priority matrix is a demonstration rule, not a representation of the ITIL framework.
+**This remains a local portfolio exercise, not a production service desk or actual employer deployment.** All data and service targets are fictional. The server intentionally binds to `127.0.0.1`. Local tests cover authentication, role checks, CSRF, login throttling, and a backup/restore round trip; these are engineering safeguards, not a production security certification. TLS termination, scheduled/off-site backup, notification delivery, business-hour SLA calendars, operational monitoring, and an independent security review remain before real data or any network exposure. Do not expose it directly to the internet or use real employee, customer or factory information. The priority matrix is a demonstration rule, not a representation of the ITIL framework.
 
 See [architecture and design choices](docs/ARCHITECTURE.md) and [security notes](SECURITY.md).
+
+## Database backup and restore
+
+Create a verified backup outside the repository (the app should remain online while the SQLite backup API snapshots it):
+
+```powershell
+py -3 scripts/backup_db.py backup data/infraops.sqlite D:\MIHWAR-backups\infraops-2026-10-23.sqlite
+```
+
+Restore only after stopping the app. The command validates SQLite integrity and foreign keys, creates a timestamped `.pre-restore-*.bak` copy of the current database, then atomically installs the verified backup:
+
+```powershell
+py -3 scripts/backup_db.py restore D:\MIHWAR-backups\infraops-2026-10-23.sqlite data/infraops.sqlite
+```
+
+These commands were round-trip tested locally. They do not provide scheduling, off-site retention, encryption-at-rest, access control, or a tested recovery-time objective; those must be provided by the deployment environment before real data.
+
+## Deployment boundary
+
+The built-in server intentionally listens only on loopback and is suitable for local development. For a protected staging environment behind a same-host TLS reverse proxy, set `MIHWAR_SECURE_COOKIES=1`. If that proxy supplies `X-Forwarded-For`, also set `MIHWAR_TRUSTED_PROXY_IP` to the proxy's exact peer address and configure it to replace that header with one validated client IP. The app trusts no forwarded address otherwise. Configure HTTPS redirects, HSTS, request limits, access logs and health monitoring at the proxy/host. Do not expose the Python server directly or treat this as production approval; run a deployment-specific security review and recovery drill first.

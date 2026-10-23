@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -10,13 +11,28 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.cookiejar import CookieJar
 from urllib.request import HTTPCookieProcessor, build_opener
+from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import start_server, spreadsheet_safe
+from app import start_server, spreadsheet_safe, secure_cookie_attributes, login_source_address
 from store import determine_priority, Store
+from scripts.backup_db import backup, integrity_check, restore
 
 
 class RulesTests(unittest.TestCase):
+    def test_secure_cookie_mode_adds_secure_and_httponly_flags(self):
+        with patch.dict(os.environ, {"MIHWAR_SECURE_COOKIES":"1"}):
+            flags = secure_cookie_attributes()
+            self.assertIn("; Secure", flags)
+            self.assertIn("; HttpOnly", flags)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertNotIn("; Secure", secure_cookie_attributes())
+
+    def test_login_forwarded_address_is_trusted_only_from_exact_proxy_peer(self):
+        self.assertEqual(login_source_address("127.0.0.1", "203.0.113.9", "127.0.0.1"), "203.0.113.9")
+        self.assertEqual(login_source_address("192.0.2.2", "203.0.113.9", "127.0.0.1"), "192.0.2.2")
+        self.assertEqual(login_source_address("127.0.0.1", "203.0.113.9, 127.0.0.1", "127.0.0.1"), "127.0.0.1")
+
     def test_impact_urgency_priority_matrix(self):
         self.assertEqual(determine_priority(3, 3), "P1")
         self.assertEqual(determine_priority(3, 2), "P2")
@@ -30,6 +46,46 @@ class RulesTests(unittest.TestCase):
 
 
 class DataIntegrityTests(unittest.TestCase):
+    def test_login_throttle_locks_only_username_and_source_pair_and_can_clear(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp) / "throttle.sqlite")
+            for _ in range(5):
+                store.record_login_failure("Demo-User", "127.0.0.1")
+            self.assertEqual(store.login_allowed("demo-user", "127.0.0.1")[0], False)
+            self.assertEqual(store.login_allowed("demo-user", "127.0.0.2")[0], True)
+            store.clear_login_failures("DEMO-USER", "127.0.0.1")
+            self.assertEqual(store.login_allowed("demo-user", "127.0.0.1"), (True, 0))
+
+    def test_backup_restore_round_trip_and_pre_restore_safety_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            live = root / "live.sqlite"
+            snapshot = root / "snapshot.sqlite"
+            store = Store(live)
+            store.ensure_user("backup-user", "SyntheticBackup-1!", "employee")
+            user_id = store.authenticate("backup-user", "SyntheticBackup-1!")["id"]
+            original = store.create_employee_ticket(user_id, {"title":"Original backup record","description":"before snapshot","asset_id":None,"impact":1,"urgency":1})
+            backup(live, snapshot)
+            store.create_employee_ticket(user_id, {"title":"Post backup record","description":"after snapshot","asset_id":None,"impact":1,"urgency":1})
+            restore(snapshot, live)
+            restored = Store(live)
+            self.assertEqual([ticket["id"] for ticket in restored.employee_tickets(user_id)], [original["id"]])
+            self.assertEqual(integrity_check(live), "ok")
+            safety_copies = list(root.glob("live.sqlite.pre-restore-*.bak"))
+            self.assertEqual(len(safety_copies), 1)
+            self.assertEqual(len(Store(safety_copies[0]).employee_tickets(user_id)), 2)
+
+    def test_restore_rejects_corrupt_backup_without_changing_live_database(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            live = root / "live.sqlite"
+            broken = root / "broken.sqlite"
+            Store(live)
+            broken.write_bytes(b"not a sqlite database")
+            with self.assertRaises((ValueError, sqlite3.DatabaseError)):
+                restore(broken, live)
+            self.assertEqual(integrity_check(live), "ok")
+
     def test_csv_cells_are_safe_in_spreadsheets(self):
         for value in ("=1+2", "+cmd", "-3+5", "@formula", " \t=SUM(A1:A2)"):
             self.assertTrue(spreadsheet_safe(value).startswith("'"))
@@ -155,6 +211,24 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertIn(b"'use strict'", self.request("/static/app.js")[0])
         self.assertEqual(json.loads(self.request("/api/health")[0])["status"],"ok")
 
+    def test_login_api_throttles_repeated_bad_passwords(self):
+        Store(self.db).ensure_user("rate-limit-demo", "SyntheticRateLimit-1!", "technician")
+        jar = CookieJar(); client = build_opener(HTTPCookieProcessor(jar))
+        with client.open(self.url + "/api/session", timeout=5) as response:
+            csrf = json.loads(response.read())["csrf_token"]
+        for _ in range(5):
+            req = Request(self.url + "/api/login", data=json.dumps({"username":"rate-limit-demo","password":"wrong-password"}).encode(), method="POST", headers={"Content-Type":"application/json","X-CSRF-Token":csrf})
+            with self.assertRaises(HTTPError) as denied:
+                client.open(req, timeout=5)
+            self.assertEqual(denied.exception.code, 401)
+            denied.exception.close()
+        req = Request(self.url + "/api/login", data=json.dumps({"username":"rate-limit-demo","password":"SyntheticRateLimit-1!"}).encode(), method="POST", headers={"Content-Type":"application/json","X-CSRF-Token":csrf})
+        with self.assertRaises(HTTPError) as limited:
+            client.open(req, timeout=5)
+        self.assertEqual(limited.exception.code, 429)
+        self.assertGreater(int(limited.exception.headers["Retry-After"]), 0)
+        limited.exception.close()
+
     def test_07_unknown_asset_and_invalid_status(self):
         bad_asset = {"title":"Unknown asset ticket", "asset_id":9999,"impact":2,"urgency":2}
         error = json.loads(self.request("/api/tickets", method="POST", payload=bad_asset, status=400)[0])
@@ -227,16 +301,26 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(assigned["assigned_to"], 3)
         denied, _ = self.request(f"/api/tickets/{created['id']}", status=404)
         self.assertIn("not found", json.loads(denied)["error"].lower())
+        denied_update, _ = self.request(f"/api/tickets/{created['id']}", method="PATCH",
+            payload={"status":"In Progress","note":"Must not cross technician assignment"}, status=404)
+        self.assertIn("not found", json.loads(denied_update)["error"].lower())
         assigned = json.loads(self.request(f"/api/tickets/{created['id']}/assign", method="PATCH",
             payload={"technician_id":1}, headers=self.admin_headers)[0])
         self.assertEqual(assigned["assigned_to"], 1)
         technician_view = json.loads(self.request(f"/api/tickets/{created['id']}")[0])
         self.assertEqual(technician_view["title"], "Employee wireless issue")
+        self.request(f"/api/tickets/{created['id']}/notes", method="POST", payload={"note":"Checked the synthetic switch port","internal":True})
+        self.request(f"/api/tickets/{created['id']}/notes", method="POST", payload={"note":"We are investigating your network report","internal":False})
+        with first.open(self.url + f"/api/employee/tickets/{created['id']}", timeout=5) as response:
+            employee_updates = json.loads(response.read())
+        self.assertFalse(any("synthetic switch port" in event["note"] for event in employee_updates["events"]))
+        self.assertTrue(any("investigating your network report" in event["note"] for event in employee_updates["events"]))
         progressing = json.loads(self.request(f"/api/tickets/{created['id']}", method="PATCH",
             payload={"status":"In Progress","note":"Reviewed synthetic connection details"})[0])
         resolved = json.loads(self.request(f"/api/tickets/{created['id']}", method="PATCH",
             payload={"status":"Resolved","note":"Applied and verified a demo network fix"})[0])
         self.assertEqual(resolved["status"], "Resolved")
+        self.assertTrue(any(event["event"] == "Internal: Note" for event in resolved["events"]))
         self.assertEqual(resolved["events"][-1]["actor_username"], "demo-tech")
         with first.open(self.url + f"/api/employee/tickets/{created['id']}", timeout=5) as response:
             employee_result = json.loads(response.read())
