@@ -1,0 +1,6 @@
+.employee-admin-cols{align-items:start}
+.employee-admin-form{padding:8px 24px 24px}
+.employee-admin-form label{display:block;margin:14px 0;color:#425771;font-size:12px;font-weight:700}
+.employee-admin-form input{margin-top:7px;font-weight:400}
+.employee-admin-form .hint{margin:12px 0 18px}
+@media(max-width:750px){.employee-admin-form{padding:8px 17px 20px}}

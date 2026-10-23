@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="بوابة الموظفين لتقديم طلبات وبلاغات تقنية المعلومات ومتابعتها">
+  <title>مِحور | بوابة الموظفين</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/employee.css">
+  <script src="/static/employee.js" defer></script>
+</head>
+<body>
+  <main class="employee-shell">
+    <header class="employee-head">
+      <a class="employee-brand" href="/" aria-label="MIHWAR"><span data-i18n="brand">مِحور</span><small data-i18n="brandSub">بوابة الموظفين · خدمات تقنية المعلومات</small></a>
+      <div class="employee-head-actions"><button id="languageButton" class="btn secondary" type="button" lang="en">English</button><a class="btn secondary" href="/" data-i18n="operatorSignIn">دخول فريق الدعم</a></div>
+    </header>
+    <section id="loginPanel" class="employee-card employee-login">
+      <h1 data-i18n="loginTitle">تسجيل الدخول</h1>
+      <p class="subtitle" data-i18n="loginIntro">سجّل الدخول باستخدام بيانات الحساب التي زوّدك بها مسؤول النظام.</p>
+      <form id="loginForm">
+        <label><span data-i18n="username">اسم المستخدم</span><input name="username" autocomplete="username" maxlength="80" required></label>
+        <label><span data-i18n="password">كلمة المرور</span><input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+        <p id="loginError" class="employee-error" role="alert"></p>
+        <button class="btn primary" type="submit" data-i18n="signIn">دخول</button>
+      </form>
+    </section>
+    <section id="portal" class="hidden">
+      <section class="employee-card">
+        <div class="employee-head"><div><h1 data-i18n="myRequests">طلباتي</h1><p class="subtitle" data-i18n="portalIntro">قدّم طلب دعم جديدًا وتابع مستجداته من هنا.</p></div><button id="logoutButton" class="btn secondary" type="button" data-i18n="signOut">تسجيل الخروج</button></div>
+        <p class="employee-note" data-i18n="sampleNote">تتضمن مساحة المراجعة الحالية بيانات أصول وبلاغات مولّدة لأغراض تقييم المنتج. هذه الأمثلة ليست سجلات تشغيل فعلية للمصنع. أما البلاغات التي تقدمها فتُحفظ في حسابك.</p>
+      </section>
+      <section class="employee-card">
+        <div class="form-intro"><span class="employee-step">1</span><div><h2 data-i18n="newRequest">طلب دعم جديد</h2><p class="subtitle" data-i18n="formIntro">أخبرنا باختصار ما المشكلة وأين ظهرت. فريق الدعم يحدد الأولوية ويتابع معك.</p></div></div>
+        <form id="ticketForm">
+          <label><span data-i18n="titleLabel">عنوان مختصر للمشكلة</span><input name="title" minlength="5" maxlength="120" required data-placeholder="titlePlaceholder" placeholder="مثال: لا أستطيع الاتصال بشبكة الواي فاي"></label>
+          <div class="employee-grid">
+            <label><span data-i18n="categoryLabel">نوع الطلب</span><select name="category"><option value="Network & connectivity" data-i18n="catNetwork">الشبكة والاتصال</option><option value="Accounts & access" data-i18n="catAccounts">الحسابات والصلاحيات</option><option value="Devices & peripherals" data-i18n="catDevices">الأجهزة والملحقات</option><option value="Software & services" data-i18n="catSoftware">البرامج والخدمات</option><option value="Other" data-i18n="catOther">أخرى</option></select></label>
+            <label><span data-i18n="assetLabel">الجهاز أو الأصل المرتبط (اختياري)</span><select name="asset_id" id="assetOptions"><option value="" data-i18n="noAsset">لا أعرف / لا ينطبق</option></select></label>
+          </div>
+          <label><span data-i18n="descriptionLabel">التفاصيل</span><textarea name="description" rows="4" maxlength="1500" required data-placeholder="descriptionPlaceholder" placeholder="ما الذي حدث؟ متى بدأ؟ وهل جرّبت أي خطوة لحل المشكلة؟"></textarea><small class="field-hint" data-i18n="descriptionHint">أضف رسالة الخطأ أو اسم النظام المتأثر إن أمكن، ولا تكتب كلمات مرور أو معلومات سرية.</small></label>
+          <input type="hidden" name="impact" value="2"><input type="hidden" name="urgency" value="2">
+          <p id="ticketError" class="employee-error" role="alert"></p>
+          <button class="btn primary submit-request" type="submit"><span data-i18n="submitRequest">إرسال الطلب</span><span aria-hidden="true">←</span></button>
+        </form>
+      </section>
+      <section class="employee-card">
+        <div class="form-intro"><span class="employee-step">2</span><div><h2 data-i18n="trackRequests">متابعة طلباتي</h2><p class="subtitle" data-i18n="trackIntro">ستظهر هنا الطلبات التي قدمتها والتحديثات التي يشاركها فريق الدعم.</p></div></div>
+        <div id="ticketList" aria-live="polite" class="employee-empty" data-i18n="loading">جارٍ تحميل الطلبات…</div>
+      </section>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
