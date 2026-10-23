@@ -1,4 +1,4 @@
-"""SQLite persistence and business rules for a local, fictional IT incident demo."""
+"""SQLite persistence and business rules for the MIHWAR IT operations workspace."""
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -113,32 +113,64 @@ class Store:
             """)
             total = db.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
             if total == 0:
+                # A realistic, internally consistent sample scenario for review. Dates
+                # are illustrative and must not be represented as actual plant records.
                 db.executemany("INSERT INTO assets(asset_tag,name,category,location) VALUES(?,?,?,?)", [
-                    ("DEMO-SRV-01", "Application Server", "Server", "Demo Server Room"),
-                    ("DEMO-SW-01", "Core Switch", "Networking", "Demo Network Rack"),
-                    ("DEMO-CCTV-01", "Camera NVR", "Surveillance", "Demo Security Room"),
-                    ("DEMO-LAP-01", "Office Laptop", "Endpoint", "Demo Office"),
-                    ("DEMO-PRN-01", "Shared Printer", "Peripheral", "Demo Reception"),
-                    ("DEMO-AP-01", "Wireless Access Point", "Networking", "Demo Office"),
+                    ("IT-SRV-01", "Production Systems Server", "Server", "Control Room"),
+                    ("IT-SW-01", "Core Network Switch", "Networking", "Main Comms Rack"),
+                    ("IT-NVR-01", "Security Video Recorder", "Surveillance", "Security Office"),
+                    ("IT-WS-01", "Quality Lab Workstation", "Endpoint", "Quality Laboratory"),
+                    ("IT-PRN-01", "Dispatch Label Printer", "Peripheral", "Dispatch Area"),
+                    ("IT-AP-01", "Warehouse Wireless Access Point", "Networking", "Warehouse Zone B"),
+                    ("IT-HMI-01", "Packaging Line HMI", "Endpoint", "Packaging Line 2"),
+                    ("IT-SCAN-01", "Receiving Barcode Scanner", "Peripheral", "Receiving Bay"),
+                    ("IT-NAS-01", "Engineering File Storage", "Storage", "Control Room"),
+                    ("IT-FW-01", "Site Perimeter Firewall", "Networking", "Main Comms Rack"),
+                    ("IT-UPS-01", "Control Room UPS", "Power", "Control Room"),
+                    ("IT-CAM-02", "Loading Bay Camera", "Surveillance", "Loading Bay"),
                 ])
-                now = utcnow()
-                demo = [
-                    ("Core switch intermittent packet loss", "Intermittent connectivity in demo network", 2, 3, 3, "In Progress", -7),
-                    ("NVR recording alert", "Fictional recorder storage warning", 3, 2, 3, "Open", -3),
-                    ("Office printer queue blocked", "Demo staff unable to print", 5, 2, 2, "Open", -1),
-                    ("Application service restart needed", "Simulated background job failure", 1, 2, 2, "Resolved", -18),
-                    ("Laptop disk cleanup", "Fictional endpoint storage issue", 4, 1, 1, "Resolved", -48),
-                    ("Access point roaming issue", "Simulated Wi-Fi user disconnects", 6, 2, 1, "Open", -0.5),
+                # Fixed dates make the sample timeline stable and repeatable.
+                samples = [
+                    ("Label queue delayed at dispatch", "Dispatch label jobs remained queued after the print service stopped responding. Queue cleared and a test label was verified.", 5, "Printing", 2, 2, "Resolved", "2026-03-03T07:42:00Z", 1.8),
+                    ("Warehouse wireless coverage drop", "Handheld devices lost connectivity near warehouse zone B during a shift change. Access point channel utilization was reviewed.", 6, "Network", 2, 2, "Resolved", "2026-03-08T11:16:00Z", 3.2),
+                    ("Quality workstation storage warning", "The quality lab workstation reported low disk space while exporting inspection records. Temporary files were reviewed and cleared.", 4, "Endpoint", 2, 1, "Resolved", "2026-03-14T09:05:00Z", 4.1),
+                    ("Receiving scanner battery not charging", "The receiving barcode scanner did not charge in its dock. Dock power and battery condition were checked.", 8, "Endpoint", 1, 2, "Resolved", "2026-03-22T06:48:00Z", 2.4),
+                    ("Core switch interface errors", "Interface counters on the main comms rack showed intermittent errors. Patch lead and port health were inspected.", 2, "Network", 3, 2, "Resolved", "2026-04-02T13:21:00Z", 2.7),
+                    ("Engineering share access interrupted", "Engineering clients could not reconnect to the shared project folder after a network maintenance window. Name resolution and share permissions were checked.", 9, "Storage", 2, 2, "Resolved", "2026-04-11T08:32:00Z", 3.6),
+                    ("Packaging HMI login delay", "Operator sign-in at packaging line 2 took longer than usual. Device connectivity and authentication service response were reviewed.", 7, "Operations IT", 3, 2, "Resolved", "2026-04-19T05:54:00Z", 2.1),
+                    ("Perimeter firewall backup check", "The scheduled configuration backup did not appear in the expected archive. Job status and destination capacity were verified.", 10, "Security", 2, 1, "Resolved", "2026-04-28T15:10:00Z", 5.5),
+                    ("Security recorder disk threshold alert", "The recorder reported that available storage had crossed its configured warning threshold. Retention status and disk health were reviewed.", 3, "Surveillance", 2, 2, "Resolved", "2026-05-06T10:44:00Z", 3.1),
+                    ("UPS maintenance notification", "The control room UPS reported a battery maintenance notification. Self-test results were captured for facilities follow-up.", 11, "Power", 2, 1, "Resolved", "2026-05-15T07:20:00Z", 6.2),
+                    ("Dispatch printer calibration request", "Label alignment drift was reported on the dispatch printer. Calibration output was reviewed with the operator.", 5, "Printing", 1, 2, "Resolved", "2026-05-27T12:03:00Z", 2.0),
+                    ("Core services response slowdown", "Several internal applications responded slowly during the morning shift. Server resource utilization and service logs were checked.", 1, "Server", 3, 2, "Resolved", "2026-06-04T06:37:00Z", 3.3),
+                    ("Loading bay camera feed unavailable", "The loading bay camera feed was unavailable in the security client. Link status and recorder channel assignment were checked.", 12, "Surveillance", 2, 2, "Resolved", "2026-06-13T14:25:00Z", 2.8),
+                    ("Warehouse access point reboot observed", "A warehouse access point restarted unexpectedly. Uplink stability and device event history were reviewed.", 6, "Network", 2, 2, "Resolved", "2026-06-25T04:58:00Z", 3.9),
+                    ("Quality export folder permission request", "A quality team member requested access to the controlled inspection export folder. The request was checked against the approved role list.", 4, "Access", 1, 1, "Resolved", "2026-07-03T09:40:00Z", 7.0),
+                    ("Engineering storage capacity review", "Shared engineering storage approached its planning threshold. Usage by top-level folder was reviewed for capacity planning.", 9, "Storage", 2, 2, "Resolved", "2026-07-17T11:12:00Z", 4.4),
+                    ("Packaging line HMI time offset", "The packaging HMI clock differed from the site time source. Synchronization status was checked after a scheduled restart.", 7, "Operations IT", 2, 2, "Resolved", "2026-07-29T05:36:00Z", 3.0),
+                    ("Receiving handheld cannot sync", "A receiving handheld completed scans locally but did not synchronize its latest batch. Wireless reachability and application status were checked.", 8, "Endpoint", 2, 2, "Resolved", "2026-08-07T07:58:00Z", 2.9),
+                    ("Main comms rack temperature alert", "An environmental sensor reported elevated rack temperature. Airflow and room cooling status were escalated for facilities review.", 2, "Facilities IT", 3, 3, "Resolved", "2026-08-18T16:14:00Z", 0.7),
+                    ("Firewall rule review request", "A temporary outbound rule was submitted for review with a stated business owner and expiry date. Approval evidence was requested before change.", 10, "Security", 2, 2, "Resolved", "2026-08-26T08:20:00Z", 5.6),
+                    ("Dispatch label service intermittent", "Two dispatch stations reported intermittent label delays. Service availability and printer connectivity are being monitored.", 5, "Printing", 2, 3, "In Progress", "2026-09-04T06:31:00Z", None),
+                    ("Quality lab wireless authentication", "A lab workstation intermittently failed wireless authentication after its credential rotation. Device identity and policy status are under review.", 4, "Network", 2, 2, "Resolved", "2026-09-12T10:02:00Z", 3.8),
+                    ("Production systems backup verification", "The latest backup job completed with a warning. Restore-point integrity and available capacity are being checked.", 1, "Backup", 3, 2, "In Progress", "2026-09-23T13:46:00Z", None),
+                    ("Loading bay camera image quality", "The loading bay image appears degraded during low-light hours. Lens condition and camera exposure settings were requested for inspection.", 12, "Surveillance", 1, 2, "Open", "2026-10-02T18:10:00Z", None),
+                    ("Warehouse handheld roaming delay", "A handheld device paused while moving between warehouse zones. Roaming behavior and access point coverage are being assessed.", 6, "Network", 2, 2, "In Progress", "2026-10-09T07:24:00Z", None),
+                    ("Engineering storage growth alert", "A capacity alert was raised for the engineering share. Current growth rate and retention needs are being reviewed.", 9, "Storage", 2, 2, "Open", "2026-10-16T11:05:00Z", None),
+                    ("Control room UPS self-test warning", "A self-test warning was logged by the control room UPS. Facilities inspection is pending and no power interruption is reported.", 11, "Power", 2, 2, "Open", "2026-10-21T05:50:00Z", None),
                 ]
-                for title, desc, asset_id, impact, urgency, status, hours_back in demo:
-                    created = now + timedelta(hours=hours_back)
+                for title, desc, asset_id, category, impact, urgency, status, created_text, resolution_hours in samples:
+                    created = as_datetime(created_text)
                     priority = determine_priority(impact, urgency)
                     due = created + timedelta(hours=PRIORITY_HOURS[priority])
-                    resolved = iso(created + timedelta(hours=1)) if status == "Resolved" else None
+                    resolved = iso(created + timedelta(hours=resolution_hours)) if resolution_hours is not None else None
                     cur = db.execute("""INSERT INTO tickets(title,description,asset_id,category,impact,urgency,priority,status,created_at,due_at,resolved_at)
-                         VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (title, desc, asset_id, "IT", impact, urgency, priority, status, iso(created), iso(due), resolved))
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (title, desc, asset_id, category, impact, urgency, priority, status, created_text, iso(due), resolved))
                     db.execute("INSERT INTO ticket_events(ticket_id,event,note,created_at) VALUES(?,?,?,?)",
-                               (cur.lastrowid, "Created", "Fictional demonstration data", iso(created)))
+                               (cur.lastrowid, "Created", "Sample scenario record created for product review; not a record of plant operations.", created_text))
+                    if status == "Resolved":
+                        db.execute("INSERT INTO ticket_events(ticket_id,event,note,created_at) VALUES(?,?,?,?)",
+                                   (cur.lastrowid, "Status: Open → Resolved", "Sample scenario: the described check was completed and recorded.", resolved))
         self._migrate_legacy_ticket_schema()
         with self.connect() as db:
             event_columns = {row[1] for row in db.execute("PRAGMA table_info(ticket_events)")}
@@ -488,3 +520,4 @@ class Store:
                 "resolved": stats["resolved"] or 0, "breached": stats["breached"] or 0,
                 "p1_open": stats["p1_open"] or 0, "total": stats["total"],
                 "priority_rules_hours": PRIORITY_HOURS, "recent": self.tickets(limit=6, assigned_user=assigned_user)}
+

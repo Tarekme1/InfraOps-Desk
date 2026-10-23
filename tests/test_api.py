@@ -96,9 +96,9 @@ class DataIntegrityTests(unittest.TestCase):
             store = Store(Path(temp) / "tickets.sqlite")
             for i in range(260):
                 store.create_ticket({"title":f"Synthetic incident {i}","asset_id":1,"impact":1,"urgency":1})
-            self.assertEqual(store.dashboard()["total"], 266)
+            self.assertEqual(store.dashboard()["total"], 287)
             self.assertEqual(len(store.tickets()), 250)
-            self.assertEqual(len(store.tickets(limit=None)), 266)
+            self.assertEqual(len(store.tickets(limit=None)), 287)
 
     def test_legacy_database_migration_preserves_demo_rows_and_allows_unlinked_reports(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -166,12 +166,19 @@ class APIIntegrationTests(unittest.TestCase):
 
     def test_01_local_assets_and_dashboard(self):
         data = json.loads(self.request("/api/assets")[0])
-        self.assertEqual(len(data["assets"]), 6)
-        self.assertTrue(all(a["asset_tag"].startswith("DEMO-") for a in data["assets"]))
+        self.assertEqual(len(data["assets"]), 12)
+        self.assertTrue(all(a["asset_tag"].startswith("IT-") for a in data["assets"]))
         dashboard = json.loads(self.request("/api/dashboard")[0])
-        self.assertEqual(dashboard["assets"], 6)
+        self.assertEqual(dashboard["assets"], 12)
+        self.assertGreaterEqual(dashboard["total"], 25)
         self.assertGreater(dashboard["open"], 0)
         self.assertGreaterEqual(dashboard["breached"], 1)
+        tickets = json.loads(self.request("/api/tickets")[0])["tickets"]
+        dates = [ticket["created_at"] for ticket in tickets]
+        self.assertTrue(any(date.startswith("2026-03") for date in dates))
+        self.assertTrue(any(date.startswith("2026-10") for date in dates))
+        first_record = json.loads(self.request(f"/api/tickets/{tickets[0]['id']}")[0])
+        self.assertIn("not a record of plant operations", first_record["events"][0]["note"])
 
     def test_02_create_update_and_audit_events(self):
         body = {"title":"Backup agent failed to start", "description":"Fictional example only", "asset_id":1,"impact":3,"urgency":3}
@@ -193,14 +200,14 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertIn("error", json.loads(self.request("/api/tickets/999999", status=404)[0]))
 
     def test_04_filter_search_and_csv(self):
-        rows = json.loads(self.request("/api/tickets?q=DEMO-SW-01")[0])["tickets"]
+        rows = json.loads(self.request("/api/tickets?q=IT-SW-01")[0])["tickets"]
         self.assertGreaterEqual(len(rows), 1)
-        self.assertTrue(all(x["asset_tag"] == "DEMO-SW-01" for x in rows))
+        self.assertTrue(all(x["asset_tag"] == "IT-SW-01" for x in rows))
         rows = json.loads(self.request("/api/tickets?status=Resolved")[0])["tickets"]
         self.assertTrue(rows and all(x["status"] == "Resolved" for x in rows))
         csv_bytes, mime = self.request("/api/export.csv", headers=self.admin_headers)
         rows = list(csv.DictReader(io.StringIO(csv_bytes.decode("utf-8-sig"))))
-        self.assertGreaterEqual(len(rows), 6)
+        self.assertGreaterEqual(len(rows), 27)
         self.assertIn("text/csv",mime)
 
     def test_05_static_assets_and_health(self):
@@ -364,3 +371,4 @@ class APIIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
