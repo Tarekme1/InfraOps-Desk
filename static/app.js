@@ -24,15 +24,18 @@ function toast(message) {
 const headings = {
   overview: ['Operations overview','Incident visibility, response priorities and asset health — in one place.'],
   incidents: ['Incident management','Review outstanding incidents, change states and document actions.'],
-  assets: ['Asset registry','A compact inventory connected directly to incident records.']
+  assets: ['Asset registry','A compact inventory connected directly to incident records.'],
+  employees: ['Employee accounts','Create and manage access to the employee ticket portal.']
 };
 async function switchView(target) {
+  if (!headings[target] || (target === 'employees' && currentRole !== 'admin')) return;
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('hidden', el.id !== `view-${target}`));
   document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.view === target));
   $('#crumb').textContent = target.toUpperCase(); $('#pageTitle').textContent = headings[target][0]; $('#pageIntro').textContent = headings[target][1];
   if(target === 'overview') await refreshOverview();
   if(target === 'incidents') await refreshTickets();
   if(target === 'assets') await refreshAssets();
+  if(target === 'employees') await refreshEmployees();
 }
 const makeRows = (list, compact=false) => list.length ? `<table><thead><tr><th>INCIDENT</th><th>PRIORITY</th><th>STATUS</th><th>SLA DEADLINE</th><th></th></tr></thead><tbody>${list.map(t => `<tr><td><div class="row-title">#${t.id} · ${escapeHTML(t.title)}</div><div class="row-sub">${escapeHTML(t.asset_tag)}</div></td><td>${priorityTag(t.priority)}</td><td>${statusTag(t.status)}</td><td>${date(t.due_at)} ${t.breached ? '<div class="breach">BREACHED</div>' : ''}</td><td><button class="ticket-open" data-ticket="${t.id}">Open ↗</button></td></tr>`).join('')}</tbody></table>` : `<p class="empty">No incidents match your filters.</p>`;
 async function refreshOverview() {
@@ -52,6 +55,11 @@ async function refreshAssets() {
   assets = (await API('/api/assets')).assets;
   $('#assetTable').innerHTML = `<table><thead><tr><th>ASSET TAG</th><th>DEVICE</th><th>CATEGORY</th><th>LOCATION</th><th>STATUS</th></tr></thead><tbody>${assets.map(a => `<tr><td>${escapeHTML(a.asset_tag)}</td><td>${escapeHTML(a.name)}</td><td>${escapeHTML(a.category)}</td><td>${escapeHTML(a.location)}</td><td>${statusTag(a.state)}</td></tr>`).join('')}</tbody></table>`;
   $('#assetOptions').innerHTML = assets.map(a => `<option value="${a.id}">${escapeHTML(a.asset_tag)} — ${escapeHTML(a.name)}</option>`).join('');
+}
+async function refreshEmployees() {
+  const employees = (await API('/api/employees')).employees;
+  $('#employeeCount').textContent = `${employees.length} portal account${employees.length === 1 ? '' : 's'}`;
+  $('#employeeTable').innerHTML = employees.length ? `<table><thead><tr><th>USERNAME</th><th>ACCESS</th></tr></thead><tbody>${employees.map(person => `<tr><td>${escapeHTML(person.username)}</td><td>Employee portal</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No employee accounts yet. Create the first account using the form.</p>';
 }
 async function viewTicket(id) {
   activeTicket = id;
@@ -101,6 +109,14 @@ document.addEventListener('click', async event => {
 });
 $('#newTicketTop').addEventListener('click',() => $('#createDialog').showModal());
 $('#createForm').addEventListener('submit',submitTicket);
+$('#employeeForm').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const form=event.currentTarget; const error=$('#employeeFormError'); error.textContent='';
+  try {
+    const result=await API('/api/employees',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:form.elements.username.value,password:form.elements.password.value})});
+    form.reset(); toast(`Employee account created: ${result.employee.username}`); await refreshEmployees();
+  } catch(err) { error.textContent=err.message; }
+});
 $('#statusForm').addEventListener('submit',submitStatus);
 $('#noteForm').addEventListener('submit',async event=>{
   event.preventDefault(); const form=event.currentTarget;
@@ -118,6 +134,7 @@ async function bootstrap() {
   if (!session.user) { $('#loginGate').classList.remove('hidden'); return; }
   currentRole = session.user.role;
   if (session.user.role === 'employee') { location.href = '/employee'; return; }
+  $('#employeesNav').classList.toggle('hidden', session.user.role !== 'admin');
   $('#appShell').classList.remove('hidden');
   await Promise.all([refreshAssets(),refreshOverview()]);
 }

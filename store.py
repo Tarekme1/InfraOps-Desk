@@ -396,6 +396,25 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute("SELECT id,username FROM users WHERE role='technician' ORDER BY username")]
 
+    def employees(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("SELECT id,username FROM users WHERE role='employee' ORDER BY username")]
+
+    def create_employee(self, username, password):
+        if not isinstance(username, str) or not 1 <= len(username.strip()) <= 80:
+            raise ValueError("Username must be 1 to 80 characters")
+        if not isinstance(password, str) or not 12 <= len(password) <= 256:
+            raise ValueError("Password must be 12 to 256 characters")
+        username = username.strip()
+        salt, password_hash = self.hash_password(password)
+        try:
+            with self.connect() as db:
+                cur = db.execute("INSERT INTO users(username,password_salt,password_hash,role) VALUES(?,?,?,'employee')",
+                                 (username, salt, password_hash))
+                return {"id": cur.lastrowid, "username": username}
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("That username is already in use") from exc
+
     def assign_ticket(self, ticket_id, technician_id, actor_id):
         with self.connect() as db:
             ticket = db.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,)).fetchone()

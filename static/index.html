@@ -6,6 +6,7 @@
   <meta name="description" content="MIHWAR — IT service and asset operations workspace">
   <title>MIHWAR | IT Operations</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/admin.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -20,6 +21,7 @@
         <button type="button" class="nav-link active" data-view="overview"><span aria-hidden="true">▦</span> Overview</button>
         <button type="button" class="nav-link" data-view="incidents"><span aria-hidden="true">◇</span> Incidents</button>
         <button type="button" class="nav-link" data-view="assets"><span aria-hidden="true">▤</span> Asset Registry</button>
+        <button type="button" class="nav-link hidden" id="employeesNav" data-view="employees"><span aria-hidden="true">♙</span> Employees</button>
       </nav>
       <div class="sidebar-bottom">
         <div class="demo-label"><span class="demo-dot"></span> SAMPLE SCENARIO</div>
@@ -53,6 +55,7 @@
         </section>
         <section id="view-incidents" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Incident register</h2><p>Service records in the generated plant IT review scenario</p></div><a class="btn secondary" href="/api/export.csv">↓ Export CSV</a></div><div class="filters"><label class="sr-only" for="ticketSearch">Search incidents</label><input id="ticketSearch" type="search" placeholder="Search title or asset tag…" maxlength="100"><label class="sr-only" for="statusFilter">Filter status</label><select id="statusFilter"><option value="">All statuses</option><option>Open</option><option>In Progress</option><option>Resolved</option></select></div><div id="ticketTable" class="table-scroll"></div></div></section>
         <section id="view-assets" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Asset registry</h2><p>Plant IT and operational technology support inventory</p></div><span class="muted-pill">12 SAMPLE ASSETS</span></div><div id="assetTable" class="table-scroll"></div></div></section>
+        <section id="view-employees" class="view hidden"><div class="cols employee-admin-cols"><section class="panel"><div class="panel-heading"><div><h2>Employee accounts</h2><p>Create sign-in access for someone who needs to submit and follow up on tickets.</p></div></div><form id="employeeForm" class="employee-admin-form"><label>Username<input name="username" autocomplete="off" minlength="1" maxlength="80" required placeholder="e.g. amira.hassan"></label><label>Temporary password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required placeholder="At least 12 characters"></label><p class="hint">Share the username and temporary password with the employee through your approved private channel. The password cannot be viewed again after the account is created.</p><p id="employeeFormError" class="auth-error" role="alert"></p><button class="btn primary" type="submit">Create employee account</button></form></section><section class="panel"><div class="panel-heading"><div><h2>Employees</h2><p id="employeeCount">Current portal accounts</p></div></div><div id="employeeTable" class="table-scroll"></div></section></div></section>
       </div>
     </main>
   </div>

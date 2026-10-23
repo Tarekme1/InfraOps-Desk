@@ -43,6 +43,7 @@ ASSETS = {"/": (ROOT / "static/index.html", "text/html; charset=utf-8"),
           "/employee": (ROOT / "static/employee.html", "text/html; charset=utf-8"),
           "/static/app.js": (ROOT / "static/app.js", "text/javascript; charset=utf-8"),
           "/static/style.css": (ROOT / "static/style.css", "text/css; charset=utf-8"),
+          "/static/admin.css": (ROOT / "static/admin.css", "text/css; charset=utf-8"),
           "/static/employee.js": (ROOT / "static/employee.js", "text/javascript; charset=utf-8"),
           "/static/employee.css": (ROOT / "static/employee.css", "text/css; charset=utf-8")}
 
@@ -138,6 +139,9 @@ class Handler(BaseHTTPRequestHandler):
                 user = self.require_user({"employee"})
                 if not user: return
                 return self.respond({"assets": self.store.assets()})
+            if path == "/api/employees":
+                if not self.require_user({"admin"}): return
+                return self.respond({"employees": self.store.employees()})
             if path == "/api/technicians":
                 if not self.require_user({"admin"}): return
                 return self.respond({"technicians": self.store.technicians()})
@@ -255,6 +259,13 @@ class Handler(BaseHTTPRequestHandler):
                 _, token = self.session()
                 self.store.logout(token)
                 return self.respond({"ok": True}, extra_headers={"Set-Cookie": f"m_session={self.cookie_attributes()}; Max-Age=0"})
+            if path == "/api/employees":
+                if not self.require_user({"admin"}, csrf=True): return
+                payload = self.read_json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Body must be a JSON object")
+                employee = self.store.create_employee(payload.get("username"), payload.get("password"))
+                return self.respond({"employee": employee}, 201)
             if path.startswith("/api/employee/tickets/") and path.endswith("/reopen"):
                 user = self.require_user({"employee"}, csrf=True)
                 if not user: return
