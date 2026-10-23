@@ -46,6 +46,41 @@ class RulesTests(unittest.TestCase):
 
 
 class DataIntegrityTests(unittest.TestCase):
+    def test_untouched_legacy_sample_database_upgrades_once(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "legacy-sample.sqlite"
+            db = sqlite3.connect(path)
+            db.executescript("""
+                CREATE TABLE assets(id INTEGER PRIMARY KEY,asset_tag TEXT NOT NULL UNIQUE,name TEXT NOT NULL,category TEXT NOT NULL,location TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'Active');
+                CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL UNIQUE,password_salt BLOB NOT NULL,password_hash BLOB NOT NULL,role TEXT NOT NULL);
+                CREATE TABLE tickets(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',asset_id INTEGER REFERENCES assets(id),assigned_to INTEGER REFERENCES users(id),category TEXT NOT NULL DEFAULT 'IT',impact INTEGER NOT NULL,urgency INTEGER NOT NULL,priority TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,due_at TEXT NOT NULL,resolved_at TEXT);
+                CREATE TABLE ticket_events(id INTEGER PRIMARY KEY AUTOINCREMENT,ticket_id INTEGER NOT NULL REFERENCES tickets(id),actor_id INTEGER REFERENCES users(id),event TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
+                CREATE TABLE ticket_owners(ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id),user_id INTEGER NOT NULL REFERENCES users(id));
+            """)
+            assets = [
+                ("DEMO-SRV-01", "Application Server", "Server", "Demo Server Room"),
+                ("DEMO-SW-01", "Core Switch", "Networking", "Demo Network Rack"),
+                ("DEMO-CCTV-01", "Camera NVR", "Surveillance", "Demo Security Room"),
+                ("DEMO-LAP-01", "Office Laptop", "Endpoint", "Demo Office"),
+                ("DEMO-PRN-01", "Shared Printer", "Peripheral", "Demo Reception"),
+                ("DEMO-AP-01", "Wireless Access Point", "Networking", "Demo Office"),
+            ]
+            db.executemany("INSERT INTO assets(asset_tag,name,category,location) VALUES(?,?,?,?)", assets)
+            for index in range(1, 7):
+                created = f"2026-10-{index:02d}T08:00:00Z"
+                db.execute("""INSERT INTO tickets(id,title,description,asset_id,category,impact,urgency,priority,status,created_at,due_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (index, f"Legacy issue {index}", "Fictional seed", index, "IT", 1, 1, "P4", "Open", created, "2026-10-04T08:00:00Z"))
+                db.execute("INSERT INTO ticket_events(ticket_id,event,note,created_at) VALUES(?,?,?,?)",
+                           (index, "Created", "Fictional demonstration data", created))
+            db.commit()
+            db.close()
+
+            migrated = Store(path)
+            self.assertEqual(len(migrated.assets()), 12)
+            self.assertEqual(migrated.dashboard()["total"], 27)
+            Store(path)
+            self.assertEqual(Store(path).dashboard()["total"], 27)
+
     def test_login_throttle_locks_only_username_and_source_pair_and_can_clear(self):
         with tempfile.TemporaryDirectory() as temp:
             store = Store(Path(temp) / "throttle.sqlite")

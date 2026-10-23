@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 9314)
+Total output lines: 549
+
 """SQLite persistence and business rules for the MIHWAR IT operations workspace."""
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -112,7 +115,33 @@ class Store:
             CREATE INDEX IF NOT EXISTS idx_ticket_owners_user ON ticket_owners(user_id,ticket_id);
             """)
             total = db.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
-            if total == 0:
+            legacy_assets = [
+                ("DEMO-SRV-01", "Application Server", "Server", "Demo Server Room", "Active"),
+                ("DEMO-SW-01", "Core Switch", "Networking", "Demo Network Rack", "Active"),
+                ("DEMO-CCTV-01", "Camera NVR", "Surveillance", "Demo Security Room", "Active"),
+                ("DEMO-LAP-01", "Office Laptop", "Endpoint", "Demo Office", "Active"),
+                ("DEMO-PRN-01", "Shared Printer", "Peripheral", "Demo Reception", "Active"),
+                ("DEMO-AP-01", "Wireless Access Point", "Networking", "Demo Office", "Active"),
+            ]
+            current_assets = [tuple(row) for row in db.execute(
+                "SELECT asset_tag,name,category,location,state FROM assets ORDER BY id")]
+            old_seed_events = db.execute("""SELECT COUNT(*) FROM ticket_events
+                WHERE event='Created' AND note='Fictional demonstration data'""").fetchone()[0]
+            legacy_seed_only = (
+                current_assets == legacy_assets
+                and db.execute("SELECT COUNT(*) FROM tickets").fetchone()[0] == 6
+                and db.execute("SELECT COUNT(*) FROM ticket_events").fetchone()[0] == 6
+                and old_seed_events == 6
+                and db.execute("SELECT COUNT(*) FROM ticket_owners").fetchone()[0] == 0
+                and db.execute("SELECT COUNT(*) FROM tickets WHERE assigned_to IS NOT NULL").fetchone()[0] == 0
+            )
+            if total == 0 or legacy_seed_only:
+                if legacy_seed_only:
+                    # Replace only the untouched six-row built-in starter set. Any
+                    # user-created or modified records make the predicate above fail.
+                    db.execute("DELETE FROM ticket_events")
+                    db.execute("DELETE FROM tickets")
+                    db.execute("DELETE FROM assets")
                 # A realistic, internally consistent sample scenario for review. Dates
                 # are illustrative and must not be represented as actual plant records.
                 db.executemany("INSERT INTO assets(asset_tag,name,category,location) VALUES(?,?,?,?)", [
@@ -205,28 +234,7 @@ class Store:
                 status TEXT NOT NULL DEFAULT 'Open',
                 created_at TEXT NOT NULL,
                 due_at TEXT NOT NULL,
-                resolved_at TEXT
-            )""")
-            fields = ["id", "title", "description", "asset_id"]
-            assigned_expr = "assigned_to" if "assigned_to" in columns else "NULL"
-            category_expr = "category" if "category" in columns else "'IT'"
-            fields.extend(["impact", "urgency", "priority", "status", "created_at", "due_at", "resolved_at"])
-            conn.execute(f"INSERT INTO tickets_new({','.join(fields)},assigned_to,category) SELECT {','.join(fields)},{assigned_expr},{category_expr} FROM tickets")
-            conn.execute("DROP TABLE tickets")
-            conn.execute("ALTER TABLE tickets_new RENAME TO tickets")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_status_due ON tickets(status,due_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ticket ON ticket_events(ticket_id,id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_ticket_owners_user ON ticket_owners(user_id,ticket_id)")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
-    @staticmethod
-    def hash_password(password, salt=None):
-        salt = salt or secrets.token_bytes(16)
+…314 tokens truncated…16)
         return salt, hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 240_000)
 
     def ensure_user(self, username, password, role):
