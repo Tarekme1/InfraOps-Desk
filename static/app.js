@@ -1,7 +1,9 @@
 'use strict';
 const $ = (selector) => document.querySelector(selector);
 const API = async (url, options = {}) => {
-  const response = await fetch(url, options);
+  const headers = new Headers(options.headers || {});
+  if (options.method && options.method !== 'GET' && csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  const response = await fetch(url, {...options, headers, credentials:'same-origin'});
   const content = await response.json();
   if (!response.ok) throw new Error(content.error || 'Request failed');
   return content;
@@ -12,6 +14,8 @@ const statusTag = (v) => `<span class="status ${v === 'Open' ? 'open' : v === 'R
 const priorityTag = (v) => `<span class="priority ${escapeHTML(v)}">${escapeHTML(v)}</span>`;
 let activeTicket = null;
 let assets = [];
+let csrfToken = '';
+let currentRole = null;
 let toastTimer;
 function toast(message) {
   const el = $('#toast'); el.textContent = message; el.classList.add('show');
@@ -53,7 +57,16 @@ async function viewTicket(id) {
   activeTicket = id;
   const t = await API(`/api/tickets/${id}`);
   $('#ticketTitle').textContent = `#${t.id} — ${t.title}`;
-  $('#ticketDetail').innerHTML = `<div class="detail-grid"><div class="detail-field">ASSET<strong>${escapeHTML(t.asset_tag)}</strong></div><div class="detail-field">PRIORITY<strong>${priorityTag(t.priority)}</strong></div><div class="detail-field">STATUS<strong>${statusTag(t.status)}</strong></div><div class="detail-field">SLA DEADLINE<strong>${date(t.due_at)}${t.breached?' · BREACHED':''}</strong></div><div class="detail-field">REPORTED<strong>${date(t.created_at)}</strong></div><div class="detail-field">RESOLVED<strong>${date(t.resolved_at)}</strong></div></div><p>${escapeHTML(t.description || 'No description provided.')}</p><h3>Audit timeline</h3><ul class="event-list">${t.events.map(e => `<li><strong>${escapeHTML(e.event)}</strong><small>${date(e.created_at)}</small>${e.note ? `<p>${escapeHTML(e.note)}</p>` : ''}</li>`).join('')}</ul>`;
+  $('#ticketDetail').innerHTML = `<div class="detail-grid"><div class="detail-field">ASSET<strong>${escapeHTML(t.asset_tag || 'Not specified')}</strong></div><div class="detail-field">CATEGORY<strong>${escapeHTML(t.category)}</strong></div><div class="detail-field">ASSIGNED TO<strong>${escapeHTML(t.assigned_username || 'Unassigned')}</strong></div><div class="detail-field">PRIORITY<strong>${priorityTag(t.priority)}</strong></div><div class="detail-field">STATUS<strong>${statusTag(t.status)}</strong></div><div class="detail-field">SLA DEADLINE<strong>${date(t.due_at)}${t.breached?' · BREACHED':''}</strong></div><div class="detail-field">REPORTED<strong>${date(t.created_at)}</strong></div><div class="detail-field">RESOLVED<strong>${date(t.resolved_at)}</strong></div></div><p>${escapeHTML(t.description || 'No description provided.')}</p>${currentRole === 'admin' ? '<form id="assignmentForm" class="status-form"><label>Assign technician<select name="technician_id" required></select></label><button class="btn secondary" type="submit">Save assignment</button></form>' : ''}<h3>Audit timeline</h3><ul class="event-list">${t.events.map(e => `<li><strong>${escapeHTML(e.event)}</strong><small>${date(e.created_at)}</small>${e.note ? `<p>${escapeHTML(e.note)}</p>` : ''}</li>`).join('')}</ul>`;
+  if (currentRole === 'admin') {
+    const technicians = (await API('/api/technicians')).technicians;
+    $('#assignmentForm').elements.technician_id.innerHTML = technicians.map(person => `<option value="${person.id}" ${person.id === t.assigned_to ? 'selected' : ''}>${escapeHTML(person.username)}</option>`).join('');
+    $('#assignmentForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      try { await API(`/api/tickets/${id}/assign`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({technician_id:Number(event.currentTarget.elements.technician_id.value)})}); toast(`Incident #${id} assigned`); await viewTicket(id); await refreshTickets(); }
+      catch(error) { toast(error.message); }
+    });
+  }
   $('#nextStatus').value = t.status;
   $('#statusForm').elements.note.value = '';
   $('#ticketDialog').showModal();
@@ -71,6 +84,7 @@ async function submitTicket(event) {
 }
 async function submitStatus(event) {
   event.preventDefault(); const f=event.currentTarget;
+  if (f.elements.status.value === 'Resolved' && !f.elements.note.value.trim()) { toast('Add a resolution note before resolving this ticket'); return; }
   try {
     await API(`/api/tickets/${activeTicket}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:f.elements.status.value,note:f.elements.note.value})});
     $('#ticketDialog').close(); toast(`Incident #${activeTicket} updated`);
@@ -92,4 +106,26 @@ let searchTimer;
 $('#ticketSearch').addEventListener('input',() => {clearTimeout(searchTimer); searchTimer=setTimeout(()=>refreshTickets().catch(e=>toast(e.message)),160)});
 $('#statusFilter').addEventListener('change',() => refreshTickets().catch(e=>toast(e.message)));
 $('#clock').textContent = new Date().toLocaleDateString([], {month:'short',day:'numeric',year:'numeric'});
-Promise.all([refreshAssets(),refreshOverview()]).catch(e=>toast(`Unable to load demo: ${e.message}`));
+async function bootstrap() {
+  const session = await API('/api/session'); csrfToken = session.csrf_token;
+  if (!session.user) { $('#loginGate').classList.remove('hidden'); return; }
+  currentRole = session.user.role;
+  if (session.user.role === 'employee') { location.href = '/employee'; return; }
+  $('#appShell').classList.remove('hidden');
+  await Promise.all([refreshAssets(),refreshOverview()]);
+}
+$('#operatorLogin').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.currentTarget;
+  try {
+    const result = await API('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:form.elements.username.value,password:form.elements.password.value})});
+    csrfToken = result.csrf_token;
+    currentRole = result.user.role;
+    if (result.user.role === 'employee') { location.href = '/employee'; return; }
+    $('#loginGate').classList.add('hidden'); $('#appShell').classList.remove('hidden'); form.reset();
+    await Promise.all([refreshAssets(),refreshOverview()]);
+  } catch (error) { $('#loginError').textContent = error.message; }
+});
+$('#logoutButton').addEventListener('click', async () => {
+  try { await API('/api/logout',{method:'POST'}); } finally { location.reload(); }
+});
+bootstrap().catch(e=>{ $('#loginGate').classList.remove('hidden'); $('#loginError').textContent=`Unable to load demo: ${e.message}`; });

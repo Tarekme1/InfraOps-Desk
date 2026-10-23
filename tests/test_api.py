@@ -2,11 +2,14 @@ import csv
 import io
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from http.cookiejar import CookieJar
+from urllib.request import HTTPCookieProcessor, build_opener
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import start_server, spreadsheet_safe
@@ -41,6 +44,30 @@ class DataIntegrityTests(unittest.TestCase):
             self.assertEqual(len(store.tickets()), 250)
             self.assertEqual(len(store.tickets(limit=None)), 266)
 
+    def test_legacy_database_migration_preserves_demo_rows_and_allows_unlinked_reports(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "legacy.sqlite"
+            db = sqlite3.connect(path)
+            db.executescript("""
+                CREATE TABLE assets(id INTEGER PRIMARY KEY,asset_tag TEXT NOT NULL UNIQUE,name TEXT NOT NULL,category TEXT NOT NULL,location TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'Active');
+                CREATE TABLE tickets(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',asset_id INTEGER NOT NULL REFERENCES assets(id),impact INTEGER NOT NULL,urgency INTEGER NOT NULL,priority TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,due_at TEXT NOT NULL,resolved_at TEXT);
+                CREATE TABLE ticket_events(id INTEGER PRIMARY KEY AUTOINCREMENT,ticket_id INTEGER NOT NULL REFERENCES tickets(id),event TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
+                INSERT INTO assets VALUES(1,'DEMO-OLD-01','Old demo asset','IT','Demo location','Active');
+                INSERT INTO tickets VALUES(41,'Existing fictional incident','Preserve me',1,2,2,'P3','Open','2026-10-20T10:00:00Z','2026-10-21T10:00:00Z',NULL);
+                INSERT INTO ticket_events VALUES(51,41,'Created','Legacy event','2026-10-20T10:00:00Z');
+            """)
+            db.commit(); db.close()
+            store = Store(path)
+            prior = store.ticket(41)
+            self.assertEqual(prior["asset_tag"], "DEMO-OLD-01")
+            self.assertEqual(prior["events"][0]["note"], "Legacy event")
+            store.ensure_user("migration-user", "SyntheticMigration-1!", "employee")
+            user_id = store.authenticate("migration-user", "SyntheticMigration-1!")["id"]
+            created = store.create_employee_ticket(user_id, {"title":"Unlinked demo service request","description":"Preserve old database rows","asset_id":None,"impact":1,"urgency":1})
+            self.assertIsNone(created["asset_id"])
+            with store.connect() as migrated:
+                self.assertEqual(migrated.execute("PRAGMA foreign_key_check").fetchall(), [])
+
 
 class APIIntegrationTests(unittest.TestCase):
     @classmethod
@@ -49,6 +76,14 @@ class APIIntegrationTests(unittest.TestCase):
         cls.db = str(Path(cls.temp.name) / "test.sqlite")
         cls.server = start_server(0, cls.db)
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        store = Store(cls.db)
+        store.ensure_user("demo-tech", "LocalDemo-Only-123!", "technician")
+        token, csrf, _ = store.create_session(1)
+        cls.tech_headers = {"Cookie": f"m_session={token}", "X-CSRF-Token": csrf}
+        store.ensure_user("demo-admin", "LocalAdmin-Only-123!", "admin")
+        admin_token, admin_csrf, _ = store.create_session(2)
+        cls.admin_headers = {"Cookie": f"m_session={admin_token}", "X-CSRF-Token": admin_csrf}
+        store.ensure_user("other-tech", "LocalOtherTech-123!", "technician")
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -59,9 +94,12 @@ class APIIntegrationTests(unittest.TestCase):
         cls.thread.join(timeout=3)
         cls.temp.cleanup()
 
-    def request(self, path, method="GET", payload=None, status=200):
+    def request(self, path, method="GET", payload=None, status=200, headers=None):
         data = json.dumps(payload).encode() if payload is not None else None
-        req = Request(self.url + path, data=data, method=method, headers={"Content-Type":"application/json"} if payload is not None else {})
+        request_headers = dict(self.tech_headers)
+        if payload is not None: request_headers["Content-Type"] = "application/json"
+        request_headers.update(headers or {})
+        req = Request(self.url + path, data=data, method=method, headers=request_headers)
         try:
             with urlopen(req, timeout=5) as res:
                 self.assertEqual(res.status, status)
@@ -104,7 +142,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertTrue(all(x["asset_tag"] == "DEMO-SW-01" for x in rows))
         rows = json.loads(self.request("/api/tickets?status=Resolved")[0])["tickets"]
         self.assertTrue(rows and all(x["status"] == "Resolved" for x in rows))
-        csv_bytes, mime = self.request("/api/export.csv")
+        csv_bytes, mime = self.request("/api/export.csv", headers=self.admin_headers)
         rows = list(csv.DictReader(io.StringIO(csv_bytes.decode("utf-8-sig"))))
         self.assertGreaterEqual(len(rows), 6)
         self.assertIn("text/csv",mime)
@@ -132,6 +170,8 @@ class APIIntegrationTests(unittest.TestCase):
             "status":"In Progress","note":"Checked synthetic network logs"})[0])
         self.assertEqual(progressing["status"],"In Progress")
         self.assertEqual(len(progressing["events"]),2)
+        missing_resolution = json.loads(self.request(f"/api/tickets/{tid}",method="PATCH",payload={"status":"Resolved"},status=400)[0])
+        self.assertIn("resolution note", missing_resolution["error"].lower())
         repeat = json.loads(self.request(f"/api/tickets/{tid}",method="PATCH",payload={
             "status":"In Progress","note":"Duplicated status"},status=400)[0])
         self.assertIn("already", repeat["error"])
@@ -148,6 +188,89 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertEqual(res.headers.get("X-Content-Type-Options"), "nosniff")
             self.assertEqual(res.headers.get("X-Frame-Options"), "DENY")
             self.assertEqual(res.headers.get("Referrer-Policy"), "no-referrer")
+
+    def test_10_employee_login_csrf_ownership_and_role_boundaries(self):
+        store = Store(self.db)
+        store.ensure_user("employee-one", "SyntheticEmployee-1!", "employee")
+        store.ensure_user("employee-two", "SyntheticEmployee-2!", "employee")
+
+        def login(username, password):
+            jar = CookieJar(); client = build_opener(HTTPCookieProcessor(jar))
+            with client.open(self.url + "/api/session", timeout=5) as response:
+                csrf = json.loads(response.read())["csrf_token"]
+            body = json.dumps({"username":username,"password":password}).encode()
+            req = Request(self.url + "/api/login", data=body, method="POST", headers={"Content-Type":"application/json","X-CSRF-Token":csrf})
+            with client.open(req, timeout=5) as response:
+                session = json.loads(response.read())
+            return client, session["csrf_token"]
+
+        first, first_csrf = login("employee-one", "SyntheticEmployee-1!")
+        second, second_csrf = login("employee-two", "SyntheticEmployee-2!")
+        payload = {"title":"Employee wireless issue", "description":"Synthetic employee report", "asset_id":None,"category":"شبكة","impact":2,"urgency":2}
+        req = Request(self.url + "/api/employee/tickets", data=json.dumps(payload,ensure_ascii=False).encode(), method="POST", headers={"Content-Type":"application/json","X-CSRF-Token":first_csrf})
+        with first.open(req, timeout=5) as response:
+            created = json.loads(response.read())
+        self.assertIsNone(created["asset_id"])
+        self.assertEqual(created["category"], "شبكة")
+
+        with first.open(self.url + f"/api/employee/tickets/{created['id']}", timeout=5) as response:
+            self.assertEqual(json.loads(response.read())["id"], created["id"])
+        with self.assertRaises(HTTPError) as forbidden_ticket:
+            second.open(self.url + f"/api/employee/tickets/{created['id']}", timeout=5)
+        self.assertEqual(forbidden_ticket.exception.code, 404)
+        with self.assertRaises(HTTPError) as forbidden_admin:
+            first.open(self.url + "/api/dashboard", timeout=5)
+        self.assertEqual(forbidden_admin.exception.code, 403)
+
+        assigned = json.loads(self.request(f"/api/tickets/{created['id']}/assign", method="PATCH",
+            payload={"technician_id":3}, headers=self.admin_headers)[0])
+        self.assertEqual(assigned["assigned_to"], 3)
+        denied, _ = self.request(f"/api/tickets/{created['id']}", status=404)
+        self.assertIn("not found", json.loads(denied)["error"].lower())
+        assigned = json.loads(self.request(f"/api/tickets/{created['id']}/assign", method="PATCH",
+            payload={"technician_id":1}, headers=self.admin_headers)[0])
+        self.assertEqual(assigned["assigned_to"], 1)
+        technician_view = json.loads(self.request(f"/api/tickets/{created['id']}")[0])
+        self.assertEqual(technician_view["title"], "Employee wireless issue")
+        progressing = json.loads(self.request(f"/api/tickets/{created['id']}", method="PATCH",
+            payload={"status":"In Progress","note":"Reviewed synthetic connection details"})[0])
+        resolved = json.loads(self.request(f"/api/tickets/{created['id']}", method="PATCH",
+            payload={"status":"Resolved","note":"Applied and verified a demo network fix"})[0])
+        self.assertEqual(resolved["status"], "Resolved")
+        self.assertEqual(resolved["events"][-1]["actor_username"], "demo-tech")
+        with first.open(self.url + f"/api/employee/tickets/{created['id']}", timeout=5) as response:
+            employee_result = json.loads(response.read())
+        self.assertEqual(employee_result["status"], "Resolved")
+        self.assertIn("Applied and verified", employee_result["events"][-1]["note"])
+        wrong_owner_reopen = Request(self.url + f"/api/employee/tickets/{created['id']}/reopen", data=b"{}", method="POST",
+            headers={"Content-Type":"application/json","X-CSRF-Token":second_csrf})
+        with self.assertRaises(HTTPError) as reopen_denied:
+            second.open(wrong_owner_reopen, timeout=5)
+        self.assertEqual(reopen_denied.exception.code, 404)
+        reopen = Request(self.url + f"/api/employee/tickets/{created['id']}/reopen", data=b"{}", method="POST",
+            headers={"Content-Type":"application/json","X-CSRF-Token":first_csrf})
+        with first.open(reopen, timeout=5) as response:
+            self.assertEqual(json.loads(response.read())["status"], "Open")
+        self.request(f"/api/tickets/{created['id']}", method="PATCH", payload={"status":"In Progress","note":"Rechecked after employee follow-up"})
+        resolved_again = json.loads(self.request(f"/api/tickets/{created['id']}", method="PATCH",
+            payload={"status":"Resolved","note":"Second verification completed"})[0])
+        self.assertEqual(resolved_again["status"], "Resolved")
+        self.assertEqual(resolved_again["events"][-1]["actor_username"], "demo-tech")
+        with Store(self.db).connect() as db:
+            employee_id = db.execute("SELECT id FROM users WHERE username='employee-one'").fetchone()[0]
+        self.assertEqual(Store(self.db).employee_ticket(employee_id, created["id"])["status"], "Resolved")
+        restarted = start_server(0, self.db)
+        thread = threading.Thread(target=restarted.serve_forever, daemon=True); thread.start()
+        try:
+            with first.open(f"http://127.0.0.1:{restarted.server_address[1]}/api/employee/tickets/{created['id']}", timeout=5) as response:
+                self.assertEqual(json.loads(response.read())["status"], "Resolved")
+        finally:
+            restarted.shutdown(); restarted.server_close(); thread.join(timeout=3)
+
+        no_csrf = Request(self.url + "/api/employee/tickets", data=json.dumps(payload).encode(), method="POST", headers={"Content-Type":"application/json"})
+        with self.assertRaises(HTTPError) as csrf_error:
+            first.open(no_csrf, timeout=5)
+        self.assertEqual(csrf_error.exception.code, 403)
 
     def test_06_persistence_across_store_instances(self):
         before = len(Store(self.db).tickets())

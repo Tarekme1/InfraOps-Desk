@@ -9,7 +9,10 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <div class="layout">
+  <section id="loginGate" class="auth-gate hidden" aria-labelledby="loginTitle">
+    <form id="operatorLogin" class="auth-card"><div class="eyebrow">MIHWAR · LOCAL DEMO</div><h1 id="loginTitle">Operator sign in</h1><p class="subtitle">Use a configured synthetic technician or administrator account.</p><label>Username<input name="username" autocomplete="username" maxlength="80" required></label><label>Password<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label><p id="loginError" class="auth-error" role="alert"></p><button class="btn primary" type="submit">Sign in</button><a href="/employee">Employee ticket portal →</a></form>
+  </section>
+  <div class="layout hidden" id="appShell">
     <aside class="sidebar" aria-label="Primary navigation">
       <a class="brand" href="/" aria-label="InfraOps Desk home"><span class="brand-mark">I<span>↗</span></span><span>INFRAOPS <small>DESK</small></span></a>
       <div class="nav-caption">WORKSPACE</div>
@@ -28,7 +31,7 @@
     <main class="main">
       <header class="topbar">
         <span class="breadcrumb">WORKSPACE <span>/</span> <strong id="crumb">OVERVIEW</strong></span>
-        <div class="top-right"><span class="live-dot"></span> LOCAL DEMO <span class="top-divider"></span> <span id="clock"></span></div>
+        <div class="top-right"><span class="live-dot"></span> LOCAL DEMO <span class="top-divider"></span> <span id="clock"></span> <button id="logoutButton" class="text-button" type="button">Sign out</button></div>
       </header>
       <div class="content">
         <div class="title-row">
