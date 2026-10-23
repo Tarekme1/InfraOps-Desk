@@ -16,9 +16,8 @@ All browser and database records were synthetic. The localhost browser run used 
 ## GitHub Actions result
 
 - [Published baseline CI run 39181603254](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39181603254): **passed** on October 19, 2026 before these changes.
-- [PR #2 workflow run 39884696763](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39884696763): **passed** on the exact prior feature commit `d7e6b54d6b89b16968fbee58847573ac7dbaa8c8` before this hardening follow-up.
+- [PR #2 workflow run 39886902260](https://github.com/Tarekme1/InfraOps-Desk/actions/runs/39886902260): **passed** on exact feature commit `dba38cbc3fd9286b6dfe4cdb09c4008817d5b1a6`, including the hardening follow-up.
 - All three matrix jobs passed: Python **3.10, 3.12 and 3.13**.
-- A new CI run is required for the current follow-up commit; earlier CI applies only to the exact SHA above.
 - CI verifies automated tests, not a production security review or deployment.
 
 ## Not yet verified
